@@ -64,7 +64,7 @@ jobs:
           git diff --exit-code ./vendor/
 
       - name: Lint and Tests
-        run: make
+        run: GOROOT=$(go env GOROOT) make
 
       - name: Run tests with Yaegi
         run: make yaegi_test
