@@ -159,15 +159,24 @@ func pickBit(addr netip.Addr, pos, maxBits int) int {
 		return 0
 	}
 
+	if maxBits <= 32 && addr.Is4() {
+		raw := addr.As4()
+		byteIndex := pos / bitsPerByte
+		if byteIndex < 0 || byteIndex >= len(raw) {
+			return 0
+		}
+
+		shift := 7 - (pos % bitsPerByte) //nolint:mnd // fixed bit width math
+		return int((raw[byteIndex] >> shift) & 1)
+	}
+
 	raw := addr.As16()
 	byteIndex := pos / bitsPerByte
 	if byteIndex < 0 || byteIndex >= len(raw) {
 		return 0
 	}
 
-	b := raw[byteIndex]
+	shift := 7 - (pos % bitsPerByte) //nolint:mnd // fixed bit width math
 
-	shift := 7 - (pos % bitsPerByte) //nolint:mnd // 7 and 8 (bitsPerByte) are fixed bit-width values.
-
-	return int((b >> shift) & 1)
+	return int((raw[byteIndex] >> shift) & 1)
 }
