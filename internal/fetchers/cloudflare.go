@@ -1,3 +1,4 @@
+// Package fetchers contains helper functions to download CDN IP ranges.
 package fetchers
 
 import (

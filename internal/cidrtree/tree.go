@@ -1,7 +1,14 @@
+// Package cidrtree offers a compact prefix tree used to deduplicate CIDR ranges.
 package cidrtree
 
 import (
 	"net/netip"
+)
+
+const (
+	ipv4Bits    = 32
+	ipv6Bits    = 128
+	bitsPerByte = 8
 )
 
 // Tree stores CIDR prefixes using a binary trie for fast lookups and deduplication.
@@ -22,7 +29,7 @@ func New(maxBits int) *Tree {
 }
 
 // Insert adds a prefix to the trie, removing any contained children and avoiding duplicates.
-func (t *Tree) Insert(prefix netip.Prefix) (inserted string, removed []string, covered bool) {
+func (t *Tree) Insert(prefix netip.Prefix) (string, []string, bool) {
 	if t == nil || t.root == nil {
 		return "", nil, false
 	}
@@ -51,7 +58,7 @@ func (t *Tree) Insert(prefix netip.Prefix) (inserted string, removed []string, c
 		return "", nil, true
 	}
 
-	removed = collectCIDRs(current)
+	removed := collectCIDRs(current)
 
 	current.allow = true
 	current.cidr = prefix.String()
@@ -149,16 +156,16 @@ func collectCIDRs(n *node) []string {
 }
 
 func pickBit(addr netip.Addr, pos int, maxBits int) int {
-	if maxBits == 32 {
+	if maxBits == ipv4Bits {
 		addr = addr.Unmap()
 		b := addr.As4()
-		byteIdx := pos / 8
-		shift := 7 - uint(pos%8)
+		byteIdx := pos / bitsPerByte
+		shift := uint(7 - (pos % bitsPerByte))
 		return int((b[byteIdx] >> shift) & 1)
 	}
 
 	b := addr.As16()
-	byteIdx := pos / 8
-	shift := 7 - uint(pos%8)
+	byteIdx := pos / bitsPerByte
+	shift := uint(7 - (pos % bitsPerByte))
 	return int((b[byteIdx] >> shift) & 1)
 }

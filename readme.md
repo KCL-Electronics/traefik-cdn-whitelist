@@ -1,6 +1,6 @@
 This repository includes an example plugin, `demo`, for you to use as a reference for developing your own plugins.
 
-[![Build Status](https://github.com/traefik/pluginproviderdemo/workflows/Main/badge.svg?branch=master)](https://github.com/traefik/pluginproviderdemo/actions)
+[![Build Status](https://https://github.com/KCL-Electronics/traefik-cdn-whitelist/workflows/Main/badge.svg?branch=master)](https://github.com/traefik/pluginproviderdemo/actions)
 
 The existing plugins can be browsed into the [Plugin Catalog](https://plugins.traefik.io).
 
@@ -34,7 +34,7 @@ The following declaration (given here in YAML) defines a plugin:
 experimental:
   plugins:
     example:
-      moduleName: github.com/traefik/pluginproviderdemo
+      moduleName: github.com/KCL-Electronics/traefik-cdn-whitelist
       version: v0.1.0
 
 providers:
@@ -100,7 +100,7 @@ log:
 experimental:
   localPlugins:
     example:
-      moduleName: github.com/traefik/pluginproviderdemo
+      moduleName: github.com/KCL-Electronics/traefik-cdn-whitelist
 
 providers:
   plugin:
@@ -108,7 +108,7 @@ providers:
       pollInterval: 2s
 ```
 
-(In the above example, the `pluginproviderdemo` plugin will be loaded from the path `./plugins-local/src/github.com/traefik/pluginproviderdemo`.)
+(In the above example, the `pluginproviderdemo` plugin will be loaded from the path `./plugins-local/src/github.com/KCL-Electronics/traefik-cdn-whitelist`.)
 
 ## Defining a Plugin
 

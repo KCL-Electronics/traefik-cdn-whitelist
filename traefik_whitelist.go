@@ -1,4 +1,4 @@
-package traefik_whitelist
+package whitelist
 
 import (
 	"context"
@@ -23,18 +23,25 @@ import (
 )
 
 const (
-	defaultPollInterval           = 5 * time.Minute
-	minimumPollInterval           = time.Second
-	fetchTimeout                  = 30 * time.Second
-	defaultErrorHTML              = `<html><head><title>Access Denied</title></head><body><h1>Access Denied</h1><p>Please access this service through the authorized CDN. This attempt has been logged.</p></body></html>`
+	defaultPollInterval = 5 * time.Minute
+	minimumPollInterval = time.Second
+	fetchTimeout        = 30 * time.Second
+	shutdownTimeout     = 2 * time.Second
+	serverTimeout       = 5 * time.Second
+
+	errorHTMLDefault = `<html><head><title>Access Denied</title></head><body><h1>Access Denied</h1><p>Please access this service through the authorized CDN. This attempt has been logged.</p></body></html>`
+
+	blockedServiceName      = "cdn-blocked-service"
+	whitelistMiddlewareName = "cdn-whitelist"
+	errorMiddlewareName     = "cdn-whitelist-errors"
+	chainMiddlewareName     = "cdn-whitelist-chain"
+)
+
+const (
 	defaultCloudflareIPv4Endpoint = "https://www.cloudflare.com/ips-v4/"
 	defaultCloudflareIPv6Endpoint = "https://www.cloudflare.com/ips-v6/"
 	defaultFastlyEndpoint         = "https://api.fastly.com/public-ip-list"
-	defaultAwsIPRangesEndpoint    = "https://ip-ranges.amazonaws.com/ip-ranges.json"
-	blockedServiceName            = "cdn-blocked-service"
-	whitelistMiddlewareName       = "cdn-whitelist"
-	errorMiddlewareName           = "cdn-whitelist-errors"
-	chainMiddlewareName           = "cdn-whitelist-chain"
+	defaultAWSIPRangesEndpoint    = "https://ip-ranges.amazonaws.com/ip-ranges.json"
 )
 
 var (
@@ -43,32 +50,32 @@ var (
 	fetchAWSRanges      = fetchers.FetchAWSCloudFront
 )
 
-// Config controls the CDN whitelist provider behaviour.
+// Config controls the CDN whitelist provider behavior.
 type Config struct {
 	PollInterval           string   `json:"pollInterval,omitempty"`
-	ErrorHTML              string   `json:"errorHTML,omitempty"`
+	ErrorHTML              string   `json:"errorHtml,omitempty"`
 	AllowCloudflare        bool     `json:"allowCloudflare,omitempty"`
 	AllowFastly            bool     `json:"allowFastly,omitempty"`
-	AllowAWS               bool     `json:"allowAWS,omitempty"`
-	AdditionalCIDRs        []string `json:"additionalCIDRs,omitempty"`
+	AllowAWS               bool     `json:"allowAws,omitempty"`
+	AdditionalCIDRs        []string `json:"additionalCidRs,omitempty"`
 	CloudflareIPv4Endpoint string   `json:"cloudflareIPv4Endpoint,omitempty"`
 	CloudflareIPv6Endpoint string   `json:"cloudflareIPv6Endpoint,omitempty"`
 	FastlyEndpoint         string   `json:"fastlyEndpoint,omitempty"`
-	AWSIPRangesEndpoint    string   `json:"awsIPRangesEndpoint,omitempty"`
+	AWSIPRangesEndpoint    string   `json:"awsIpRangesEndpoint,omitempty"`
 }
 
 // CreateConfig returns the default plugin configuration.
 func CreateConfig() *Config {
 	return &Config{
 		PollInterval:           "5m",
-		ErrorHTML:              defaultErrorHTML,
+		ErrorHTML:              errorHTMLDefault,
 		AllowCloudflare:        true,
 		AllowFastly:            true,
 		AllowAWS:               true,
 		CloudflareIPv4Endpoint: defaultCloudflareIPv4Endpoint,
 		CloudflareIPv6Endpoint: defaultCloudflareIPv6Endpoint,
 		FastlyEndpoint:         defaultFastlyEndpoint,
-		AWSIPRangesEndpoint:    defaultAwsIPRangesEndpoint,
+		AWSIPRangesEndpoint:    defaultAWSIPRangesEndpoint,
 	}
 }
 
@@ -102,12 +109,12 @@ func New(_ context.Context, cfg *Config, name string) (*Provider, error) {
 
 	poll := parsePollInterval(cfg.PollInterval)
 	if poll <= 0 {
-		return nil, fmt.Errorf("poll interval must be positive")
+		return nil, errors.New("poll interval must be positive")
 	}
 
 	html := strings.TrimSpace(cfg.ErrorHTML)
 	if html == "" {
-		html = defaultErrorHTML
+		html = errorHTMLDefault
 	}
 
 	if cfg.CloudflareIPv4Endpoint == "" {
@@ -120,7 +127,7 @@ func New(_ context.Context, cfg *Config, name string) (*Provider, error) {
 		cfg.FastlyEndpoint = defaultFastlyEndpoint
 	}
 	if cfg.AWSIPRangesEndpoint == "" {
-		cfg.AWSIPRangesEndpoint = defaultAwsIPRangesEndpoint
+		cfg.AWSIPRangesEndpoint = defaultAWSIPRangesEndpoint
 	}
 
 	return &Provider{
@@ -162,7 +169,7 @@ func (p *Provider) Stop() error {
 	}
 
 	if p.errorServer != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		if err := p.errorServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("[cdn-whitelist] error server shutdown: %v", err)
@@ -235,10 +242,10 @@ func (p *Provider) collectSources(ctx context.Context) ([]string, error) {
 	var errs []error
 
 	if p.cfg.AllowCloudflare {
-		if err := p.addPlaintext(ctx, v4, p.cfg.CloudflareIPv4Endpoint); err != nil {
+		if err := p.addPlaintext(ctx, v4, nil, p.cfg.CloudflareIPv4Endpoint); err != nil {
 			errs = append(errs, fmt.Errorf("cloudflare ipv4: %w", err))
 		}
-		if err := p.addPlaintext(ctx, v6, p.cfg.CloudflareIPv6Endpoint); err != nil {
+		if err := p.addPlaintext(ctx, nil, v6, p.cfg.CloudflareIPv6Endpoint); err != nil {
 			errs = append(errs, fmt.Errorf("cloudflare ipv6: %w", err))
 		}
 	}
@@ -248,8 +255,8 @@ func (p *Provider) collectSources(ctx context.Context) ([]string, error) {
 		if err != nil {
 			errs = append(errs, fmt.Errorf("fastly: %w", err))
 		} else {
-			addCIDRList(v4Ranges, v4)
-			addCIDRList(v6Ranges, v6)
+			addCIDRList(v4Ranges, v4, nil)
+			addCIDRList(v6Ranges, nil, v6)
 		}
 	}
 
@@ -258,8 +265,8 @@ func (p *Provider) collectSources(ctx context.Context) ([]string, error) {
 		if err != nil {
 			errs = append(errs, fmt.Errorf("aws: %w", err))
 		} else {
-			addCIDRList(v4Ranges, v4)
-			addCIDRList(v6Ranges, v6)
+			addCIDRList(v4Ranges, v4, nil)
+			addCIDRList(v6Ranges, nil, v6)
 		}
 	}
 
@@ -286,18 +293,18 @@ func (p *Provider) collectSources(ctx context.Context) ([]string, error) {
 	return cidrs, nil
 }
 
-func (p *Provider) addPlaintext(ctx context.Context, tree *cidrtree.Tree, endpoint string) error {
+func (p *Provider) addPlaintext(ctx context.Context, v4, v6 *cidrtree.Tree, endpoint string) error {
 	cidrs, err := fetchPlaintextCIDRs(ctx, p.client, endpoint)
 	if err != nil {
 		return err
 	}
-	addCIDRList(cidrs, tree)
+	addCIDRList(cidrs, v4, v6)
 	return nil
 }
 
-func addCIDRList(cidrs []string, tree *cidrtree.Tree) {
+func addCIDRList(cidrs []string, v4, v6 *cidrtree.Tree) {
 	for _, item := range cidrs {
-		_ = insertCIDR(item, tree, nil)
+		_ = insertCIDR(item, v4, v6)
 	}
 }
 
@@ -380,8 +387,8 @@ func (p *Provider) startErrorServer() error {
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = io.WriteString(w, p.errorHTML)
 		}),
-		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      5 * time.Second,
+		ReadHeaderTimeout: serverTimeout,
+		WriteTimeout:      serverTimeout,
 	}
 
 	p.errorURL = "http://" + listener.Addr().String()
