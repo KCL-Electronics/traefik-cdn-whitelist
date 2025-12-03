@@ -10,7 +10,7 @@ import (
 
 type fastlyResponse struct {
 	Addresses     []string `json:"addresses"`
-	IPv6Addresses []string `json:"ipv6_addresses"`
+	IPv6Addresses []string `json:"ipv6_addresses"` //nolint:tagliatelle // Fastly API uses snake_case
 }
 
 // FetchFastly returns IPv4/IPv6 ranges published by Fastly.

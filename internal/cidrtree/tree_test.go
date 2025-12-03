@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+//nolint:gocyclo // test can be complex, readability is preferred here.
 func TestInsertAndContains(t *testing.T) {
 	tree := New(32)
 

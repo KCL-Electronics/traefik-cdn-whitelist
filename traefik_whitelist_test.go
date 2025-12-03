@@ -13,8 +13,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/traefik/genconf/dynamic"
 )
 
 func TestParsePollInterval(t *testing.T) {
@@ -322,10 +320,11 @@ func TestInitAndErrorServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET to error server failed: %v", err)
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			return
+
+	// avoid shadowing outer err and still log potential close failures
+	defer func(body io.ReadCloser) {
+		if cerr := body.Close(); cerr != nil {
+			t.Logf("closing body failed: %v", cerr)
 		}
 	}(resp.Body)
 
@@ -333,12 +332,12 @@ func TestInitAndErrorServer(t *testing.T) {
 		t.Fatalf("expected status 403, got %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("reading response body failed: %v", err)
 	}
-	if !bytes.Contains(body, []byte("Access Denied")) {
-		t.Fatalf("unexpected error page body: %s", string(body))
+	if !bytes.Contains(bodyBytes, []byte("Access Denied")) {
+		t.Fatalf("unexpected error page body: %s", string(bodyBytes))
 	}
 
 	if err := p.Stop(); err != nil {
@@ -459,6 +458,3 @@ func stubDualFetcher(v4, v6 []string, err error) func(context.Context, *http.Cli
 		return slices.Clone(v4), slices.Clone(v6), nil
 	}
 }
-
-// Compile-time assertion to ensure dynamic.JSONPayload implements json.Marshaler.
-var _ json.Marshaler = (*dynamic.JSONPayload)(nil)

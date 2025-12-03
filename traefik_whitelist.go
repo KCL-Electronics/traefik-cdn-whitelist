@@ -18,9 +18,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KCL-Electronics/traefik-cdn-whitelist/internal/cidrtree" //nolint:depguard // internal usage is intentional
-	"github.com/KCL-Electronics/traefik-cdn-whitelist/internal/fetchers"
-	"github.com/traefik/genconf/dynamic"
+	"github.com/KCL-Electronics/traefik-cdn-whitelist/internal/cidrtree" //nolint:depguard // internal usage is intentional for plugin wiring
+	"github.com/KCL-Electronics/traefik-cdn-whitelist/internal/fetchers" //nolint:depguard // internal usage is intentional for plugin wiring
+	"github.com/traefik/genconf/dynamic"                                 //nolint:depguard // Traefik plugin API is allowed here
 )
 
 const (

@@ -1,13 +1,9 @@
 // Package cidrtree offers a compact prefix tree used to deduplicate CIDR ranges.
 package cidrtree
 
-import (
-	"net/netip"
-)
+import "net/netip"
 
 const (
-	ipv4Bits    = 32
-	ipv6Bits    = 128
 	bitsPerByte = 8
 )
 
@@ -138,12 +134,15 @@ func collectCIDRs(n *node) []string {
 	for len(stack) > 0 {
 		current := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
+
 		if current == nil {
 			continue
 		}
+
 		if current.allow && current.cidr != "" {
 			result = append(result, current.cidr)
 		}
+
 		if current.children[0] != nil {
 			stack = append(stack, current.children[0])
 		}
@@ -155,17 +154,20 @@ func collectCIDRs(n *node) []string {
 	return result
 }
 
-func pickBit(addr netip.Addr, pos int, maxBits int) int {
-	if maxBits == ipv4Bits {
-		addr = addr.Unmap()
-		b := addr.As4()
-		byteIdx := pos / bitsPerByte
-		shift := uint(7 - (pos % bitsPerByte))
-		return int((b[byteIdx] >> shift) & 1)
+func pickBit(addr netip.Addr, pos, maxBits int) int {
+	if pos < 0 || pos >= maxBits {
+		return 0
 	}
 
-	b := addr.As16()
-	byteIdx := pos / bitsPerByte
-	shift := uint(7 - (pos % bitsPerByte))
-	return int((b[byteIdx] >> shift) & 1)
+	raw := addr.As16()
+	byteIndex := pos / bitsPerByte
+	if byteIndex < 0 || byteIndex >= len(raw) {
+		return 0
+	}
+
+	b := raw[byteIndex]
+
+	shift := 7 - (pos % bitsPerByte) //nolint:mnd // 7 and 8 (bitsPerByte) are fixed bit-width values.
+
+	return int((b >> shift) & 1)
 }

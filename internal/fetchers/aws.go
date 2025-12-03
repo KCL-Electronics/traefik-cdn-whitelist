@@ -11,13 +11,13 @@ import (
 
 type awsIPRanges struct {
 	Prefixes []struct {
-		IPPrefix string `json:"ip_prefix"`
+		IPPrefix string `json:"ip_prefix"` //nolint:tagliatelle // AWS API uses snake_case
 		Service  string `json:"service"`
 	} `json:"prefixes"`
 	IPv6Prefixes []struct {
-		IPv6Prefix string `json:"ipv6_prefix"`
+		IPv6Prefix string `json:"ipv6_prefix"` //nolint:tagliatelle // AWS API uses snake_case
 		Service    string `json:"service"`
-	} `json:"ipv6_prefixes"`
+	} `json:"ipv6_prefixes"` //nolint:tagliatelle // AWS API uses snake_case
 }
 
 // FetchAWSCloudFront returns IPv4/IPv6 ranges for the CloudFront service.
