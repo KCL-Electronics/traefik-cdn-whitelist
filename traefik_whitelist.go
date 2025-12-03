@@ -1,3 +1,5 @@
+// Package whitelist provides a Traefik dynamic configuration provider that
+// restricts access to services behind specific CDN IP ranges.
 package whitelist
 
 import (
@@ -16,10 +18,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/traefik/genconf/dynamic"
-
-	"github.com/KCL-Electronics/traefik-cdn-whitelist/internal/cidrtree"
+	"github.com/KCL-Electronics/traefik-cdn-whitelist/internal/cidrtree" //nolint:depguard // internal usage is intentional
 	"github.com/KCL-Electronics/traefik-cdn-whitelist/internal/fetchers"
+	"github.com/traefik/genconf/dynamic"
 )
 
 const (
@@ -35,6 +36,9 @@ const (
 	whitelistMiddlewareName = "cdn-whitelist"
 	errorMiddlewareName     = "cdn-whitelist-errors"
 	chainMiddlewareName     = "cdn-whitelist-chain"
+
+	ipv4Bits = 32
+	ipv6Bits = 128
 )
 
 const (
@@ -42,12 +46,6 @@ const (
 	defaultCloudflareIPv6Endpoint = "https://www.cloudflare.com/ips-v6/"
 	defaultFastlyEndpoint         = "https://api.fastly.com/public-ip-list"
 	defaultAWSIPRangesEndpoint    = "https://ip-ranges.amazonaws.com/ip-ranges.json"
-)
-
-var (
-	fetchPlaintextCIDRs = fetchers.FetchPlaintextCIDRs
-	fetchFastlyRanges   = fetchers.FetchFastly
-	fetchAWSRanges      = fetchers.FetchAWSCloudFront
 )
 
 // Config controls the CDN whitelist provider behavior.
@@ -64,6 +62,33 @@ type Config struct {
 	AWSIPRangesEndpoint    string   `json:"awsIpRangesEndpoint,omitempty"`
 }
 
+// Provider implements the Traefik plugin provider interface.
+type Provider struct {
+	name         string
+	cfg          *Config
+	pollInterval time.Duration
+	errorHTML    string
+
+	client *http.Client
+
+	v4 *cidrtree.Tree
+	v6 *cidrtree.Tree
+
+	// Fetchers are injected to allow overriding in tests.
+	fetchPlaintextCIDRs func(context.Context, *http.Client, string) ([]string, error)
+	fetchFastlyRanges   func(context.Context, *http.Client, string) ([]string, []string, error)
+	fetchAWSRanges      func(context.Context, *http.Client, string) ([]string, []string, error)
+
+	mutex     sync.RWMutex
+	lastCIDRs []string
+	published bool
+
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	errorServer *http.Server
+	errorURL    string
+}
+
 // CreateConfig returns the default plugin configuration.
 func CreateConfig() *Config {
 	return &Config{
@@ -77,28 +102,6 @@ func CreateConfig() *Config {
 		FastlyEndpoint:         defaultFastlyEndpoint,
 		AWSIPRangesEndpoint:    defaultAWSIPRangesEndpoint,
 	}
-}
-
-// Provider implements the Traefik plugin provider interface.
-type Provider struct {
-	name         string
-	cfg          *Config
-	pollInterval time.Duration
-	errorHTML    string
-
-	client *http.Client
-
-	v4 *cidrtree.Tree
-	v6 *cidrtree.Tree
-
-	mutex     sync.RWMutex
-	lastCIDRs []string
-	published bool
-
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	errorServer *http.Server
-	errorURL    string
 }
 
 // New creates a new provider instance.
@@ -138,8 +141,12 @@ func New(_ context.Context, cfg *Config, name string) (*Provider, error) {
 		client: &http.Client{
 			Timeout: fetchTimeout,
 		},
-		v4: cidrtree.New(32),
-		v6: cidrtree.New(128),
+		v4: cidrtree.New(ipv4Bits),
+		v6: cidrtree.New(ipv6Bits),
+
+		fetchPlaintextCIDRs: fetchers.FetchPlaintextCIDRs,
+		fetchFastlyRanges:   fetchers.FetchFastly,
+		fetchAWSRanges:      fetchers.FetchAWSCloudFront,
 	}, nil
 }
 
@@ -236,45 +243,15 @@ func (p *Provider) currentCIDRs() []string {
 }
 
 func (p *Provider) collectSources(ctx context.Context) ([]string, error) {
-	v4 := cidrtree.New(32)
-	v6 := cidrtree.New(128)
+	v4 := cidrtree.New(ipv4Bits)
+	v6 := cidrtree.New(ipv6Bits)
 
 	var errs []error
 
-	if p.cfg.AllowCloudflare {
-		if err := p.addPlaintext(ctx, v4, nil, p.cfg.CloudflareIPv4Endpoint); err != nil {
-			errs = append(errs, fmt.Errorf("cloudflare ipv4: %w", err))
-		}
-		if err := p.addPlaintext(ctx, nil, v6, p.cfg.CloudflareIPv6Endpoint); err != nil {
-			errs = append(errs, fmt.Errorf("cloudflare ipv6: %w", err))
-		}
-	}
-
-	if p.cfg.AllowFastly {
-		v4Ranges, v6Ranges, err := fetchFastlyRanges(ctx, p.client, p.cfg.FastlyEndpoint)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("fastly: %w", err))
-		} else {
-			addCIDRList(v4Ranges, v4, nil)
-			addCIDRList(v6Ranges, nil, v6)
-		}
-	}
-
-	if p.cfg.AllowAWS {
-		v4Ranges, v6Ranges, err := fetchAWSRanges(ctx, p.client, p.cfg.AWSIPRangesEndpoint)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("aws: %w", err))
-		} else {
-			addCIDRList(v4Ranges, v4, nil)
-			addCIDRList(v6Ranges, nil, v6)
-		}
-	}
-
-	for _, cidr := range p.cfg.AdditionalCIDRs {
-		if err := insertCIDR(strings.TrimSpace(cidr), v4, v6); err != nil {
-			errs = append(errs, fmt.Errorf("additional %q: %w", cidr, err))
-		}
-	}
+	errs = p.appendCloudflareRanges(ctx, v4, v6, errs)
+	errs = p.appendFastlyRanges(ctx, v4, v6, errs)
+	errs = p.appendAWSRanges(ctx, v4, v6, errs)
+	errs = p.appendAdditionalCIDRs(v4, v6, errs)
 
 	cidrs := append(v4.CIDRs(), v6.CIDRs()...)
 	sort.Strings(cidrs)
@@ -293,8 +270,81 @@ func (p *Provider) collectSources(ctx context.Context) ([]string, error) {
 	return cidrs, nil
 }
 
+func (p *Provider) appendCloudflareRanges(
+	ctx context.Context,
+	v4, v6 *cidrtree.Tree,
+	errs []error,
+) []error {
+	if !p.cfg.AllowCloudflare {
+		return errs
+	}
+
+	if err := p.addPlaintext(ctx, v4, nil, p.cfg.CloudflareIPv4Endpoint); err != nil {
+		errs = append(errs, fmt.Errorf("cloudflare ipv4: %w", err))
+	}
+
+	if err := p.addPlaintext(ctx, nil, v6, p.cfg.CloudflareIPv6Endpoint); err != nil {
+		errs = append(errs, fmt.Errorf("cloudflare ipv6: %w", err))
+	}
+
+	return errs
+}
+
+func (p *Provider) appendFastlyRanges(
+	ctx context.Context,
+	v4, v6 *cidrtree.Tree,
+	errs []error,
+) []error {
+	if !p.cfg.AllowFastly {
+		return errs
+	}
+
+	v4Ranges, v6Ranges, err := p.fetchFastlyRanges(ctx, p.client, p.cfg.FastlyEndpoint)
+	if err != nil {
+		return append(errs, fmt.Errorf("fastly: %w", err))
+	}
+
+	addCIDRList(v4Ranges, v4, nil)
+	addCIDRList(v6Ranges, nil, v6)
+
+	return errs
+}
+
+func (p *Provider) appendAWSRanges(
+	ctx context.Context,
+	v4, v6 *cidrtree.Tree,
+	errs []error,
+) []error {
+	if !p.cfg.AllowAWS {
+		return errs
+	}
+
+	v4Ranges, v6Ranges, err := p.fetchAWSRanges(ctx, p.client, p.cfg.AWSIPRangesEndpoint)
+	if err != nil {
+		return append(errs, fmt.Errorf("aws: %w", err))
+	}
+
+	addCIDRList(v4Ranges, v4, nil)
+	addCIDRList(v6Ranges, nil, v6)
+
+	return errs
+}
+
+func (p *Provider) appendAdditionalCIDRs(
+	v4, v6 *cidrtree.Tree,
+	errs []error,
+) []error {
+	for _, cidr := range p.cfg.AdditionalCIDRs {
+		if err := insertCIDR(strings.TrimSpace(cidr), v4, v6); err != nil {
+			errs = append(errs, fmt.Errorf("additional %q: %w", cidr, err))
+		}
+	}
+
+	return errs
+}
+
 func (p *Provider) addPlaintext(ctx context.Context, v4, v6 *cidrtree.Tree, endpoint string) error {
-	cidrs, err := fetchPlaintextCIDRs(ctx, p.client, endpoint)
+	cidrs, err := p.fetchPlaintextCIDRs(ctx, p.client, endpoint)
 	if err != nil {
 		return err
 	}
@@ -381,7 +431,7 @@ func (p *Provider) startErrorServer() error {
 	}
 
 	srv := &http.Server{
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-store")
 			w.WriteHeader(http.StatusForbidden)
