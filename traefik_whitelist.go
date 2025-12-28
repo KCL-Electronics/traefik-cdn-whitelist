@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -227,11 +226,11 @@ func (p *Provider) setCIDRs(cidrs []string) bool {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 
-	if slices.Equal(p.lastCIDRs, cidrs) {
+	if equalStringSlices(p.lastCIDRs, cidrs) {
 		return false
 	}
 
-	p.lastCIDRs = slices.Clone(cidrs)
+	p.lastCIDRs = cloneStringSlice(cidrs)
 	return true
 }
 
@@ -239,7 +238,7 @@ func (p *Provider) currentCIDRs() []string {
 	p.mutex.RLock()
 	defer p.mutex.RUnlock()
 
-	return slices.Clone(p.lastCIDRs)
+	return cloneStringSlice(p.lastCIDRs)
 }
 
 func (p *Provider) collectSources(ctx context.Context) ([]string, error) {
@@ -474,4 +473,28 @@ func parsePollInterval(raw string) time.Duration {
 
 func boolPtr(v bool) *bool {
 	return &v
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+func cloneStringSlice(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
 }

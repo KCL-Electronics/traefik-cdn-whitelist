@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -131,8 +130,8 @@ func TestCollectSourcesAggregatesRanges(t *testing.T) {
 	}
 	sort.Strings(expected)
 
-	if !slices.Equal(cidrs, expected) {
-		t.Fatalf("collectSources unexpected result: got %v want %v", cidrs, expected)
+	if !equalStringSlices(cidrs, expected) {
+		t.Fatalf("unexpected cidrs: %v", cidrs)
 	}
 }
 
@@ -160,8 +159,8 @@ func TestCollectSourcesHandlesPartialErrors(t *testing.T) {
 		t.Fatalf("collectSources returned error: %v", err)
 	}
 
-	if want := []string{"1.1.1.0/24"}; !slices.Equal(cidrs, want) {
-		t.Fatalf("unexpected CIDRs: got %v want %v", cidrs, want)
+	if want := []string{"1.1.1.0/24"}; !equalStringSlices(cidrs, want) {
+		t.Fatalf("expected %v, got %v", want, cidrs)
 	}
 }
 
@@ -217,13 +216,13 @@ func TestSetCIDRsDetectsChangesAndCopies(t *testing.T) {
 	}
 
 	got := p.currentCIDRs()
-	if !slices.Equal(got, []string{"1.1.1.0/24"}) {
+	if !equalStringSlices(got, []string{"1.1.1.0/24"}) {
 		t.Fatalf("currentCIDRs mismatch: %v", got)
 	}
 
 	// mutate returned slice and ensure Provider's internal slice is not affected
 	got[0] = "2.2.2.0/24"
-	if slices.Equal(p.currentCIDRs(), got) {
+	if equalStringSlices(p.currentCIDRs(), got) {
 		t.Fatalf("currentCIDRs should return a defensive copy")
 	}
 }
@@ -254,16 +253,16 @@ func TestBuildConfigurationIncludesErrorService(t *testing.T) {
 	}
 
 	wantChain := []string{whitelistMiddlewareName, errorMiddlewareName}
-	if !slices.Equal(chain.Chain.Middlewares, wantChain) {
-		t.Fatalf("chain order mismatch: got %v want %v", chain.Chain.Middlewares, wantChain)
+	if !equalStringSlices(chain.Chain.Middlewares, wantChain) {
+		t.Fatalf("unexpected middlewares: %v", chain.Chain.Middlewares)
 	}
 
 	whitelist := cfg.HTTP.Middlewares[whitelistMiddlewareName]
 	if whitelist == nil || whitelist.IPWhiteList == nil {
 		t.Fatalf("whitelist middleware missing: %#v", whitelist)
 	}
-	if !slices.Equal(whitelist.IPWhiteList.SourceRange, []string{"1.1.1.0/24"}) {
-		t.Fatalf("unexpected whitelist ranges: %v", whitelist.IPWhiteList.SourceRange)
+	if !equalStringSlices(whitelist.IPWhiteList.SourceRange, []string{"1.1.1.0/24"}) {
+		t.Fatalf("unexpected source ranges: %v", whitelist.IPWhiteList.SourceRange)
 	}
 }
 
@@ -443,7 +442,7 @@ func stubPlaintextFetcher(values map[string][]string, errs map[string]error) fun
 			return nil, err
 		}
 		if ranges, ok := values[endpoint]; ok {
-			out := slices.Clone(ranges)
+			out := cloneStringSlice(ranges)
 			return out, nil
 		}
 		return nil, fmt.Errorf("unexpected endpoint %q", endpoint)
@@ -455,6 +454,6 @@ func stubDualFetcher(v4, v6 []string, err error) func(context.Context, *http.Cli
 		if err != nil {
 			return nil, nil, err
 		}
-		return slices.Clone(v4), slices.Clone(v6), nil
+		return cloneStringSlice(v4), cloneStringSlice(v6), nil
 	}
 }
