@@ -13,8 +13,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/traefik/genconf/dynamic"
 )
 
 func TestParsePollInterval(t *testing.T) {
@@ -255,10 +253,57 @@ func TestBuildConfigurationIncludesErrorService(t *testing.T) {
 
 	cfg := p.buildConfiguration()
 
-	assertHTTPConfigPresent(t, cfg)
-	assertErrorServiceConfigured(t, cfg, p.errorURL)
-	assertChainMiddlewareConfigured(t, cfg)
-	assertWhitelistMiddlewareConfigured(t, cfg, []string{"1.1.1.0/24"})
+	if cfg.HTTP == nil {
+		t.Fatalf("HTTP configuration should not be nil")
+	}
+
+	svc := cfg.HTTP.Services[blockedServiceName]
+	if svc == nil || svc.LoadBalancer == nil || len(svc.LoadBalancer.Servers) != 1 {
+		t.Fatalf("blocked service not configured: %#v", svc)
+	}
+	if svc.LoadBalancer.Servers[0].URL != p.errorURL {
+		t.Fatalf("expected error URL %q got %q", p.errorURL, svc.LoadBalancer.Servers[0].URL)
+	}
+}
+
+func TestBuildConfigurationIncludesChainMiddleware(t *testing.T) {
+	if isYaegi() {
+		t.Skip("yaegi interpreter cannot run this test reliably")
+	}
+	p := newTestProvider(t, CreateConfig())
+	p.errorURL = "http://127.0.0.1:8080"
+	p.setCIDRs([]string{"1.1.1.0/24"})
+
+	cfg := p.buildConfiguration()
+	chain := cfg.HTTP.Middlewares[chainMiddlewareName]
+	if chain == nil || chain.Chain == nil {
+		t.Fatalf("chain middleware missing: %#v", chain)
+	}
+
+	want := []string{whitelistMiddlewareName, errorMiddlewareName}
+	if !equalStringSlices(chain.Chain.Middlewares, want) {
+		t.Fatalf("unexpected middlewares: %v", chain.Chain.Middlewares)
+	}
+}
+
+func TestBuildConfigurationIncludesWhitelistMiddleware(t *testing.T) {
+	if isYaegi() {
+		t.Skip("yaegi interpreter cannot run this test reliably")
+	}
+	p := newTestProvider(t, CreateConfig())
+	p.errorURL = "http://127.0.0.1:8080"
+	p.setCIDRs([]string{"1.1.1.0/24"})
+
+	cfg := p.buildConfiguration()
+	whitelist := cfg.HTTP.Middlewares[whitelistMiddlewareName]
+	if whitelist == nil || whitelist.IPWhiteList == nil {
+		t.Fatalf("whitelist middleware missing: %#v", whitelist)
+	}
+
+	wantRanges := []string{"1.1.1.0/24"}
+	if !equalStringSlices(whitelist.IPWhiteList.SourceRange, wantRanges) {
+		t.Fatalf("unexpected source ranges: %v", whitelist.IPWhiteList.SourceRange)
+	}
 }
 
 func TestBuildConfigurationOmitsErrorServiceWithoutURL(t *testing.T) {
@@ -464,47 +509,4 @@ func stubDualFetcher(v4, v6 []string, err error) func(context.Context, *http.Cli
 
 func isYaegi() bool {
 	return os.Getenv("YAEGI_YAEGIPATH") != ""
-}
-
-func assertHTTPConfigPresent(t *testing.T, cfg *dynamic.Configuration) {
-	t.Helper()
-	if cfg == nil || cfg.HTTP == nil {
-		t.Fatalf("HTTP configuration should not be nil")
-	}
-}
-
-func assertErrorServiceConfigured(t *testing.T, cfg *dynamic.Configuration, expectedURL string) {
-	t.Helper()
-	svc := cfg.HTTP.Services[blockedServiceName]
-	if svc == nil || svc.LoadBalancer == nil || len(svc.LoadBalancer.Servers) != 1 {
-		t.Fatalf("blocked service not configured: %#v", svc)
-	}
-
-	if svc.LoadBalancer.Servers[0].URL != expectedURL {
-		t.Fatalf("expected error URL %q got %q", expectedURL, svc.LoadBalancer.Servers[0].URL)
-	}
-}
-
-func assertChainMiddlewareConfigured(t *testing.T, cfg *dynamic.Configuration) {
-	t.Helper()
-	chain := cfg.HTTP.Middlewares[chainMiddlewareName]
-	if chain == nil || chain.Chain == nil {
-		t.Fatalf("chain middleware missing: %#v", chain)
-	}
-
-	wantChain := []string{whitelistMiddlewareName, errorMiddlewareName}
-	if !equalStringSlices(chain.Chain.Middlewares, wantChain) {
-		t.Fatalf("unexpected middlewares: %v", chain.Chain.Middlewares)
-	}
-}
-
-func assertWhitelistMiddlewareConfigured(t *testing.T, cfg *dynamic.Configuration, want []string) {
-	t.Helper()
-	whitelist := cfg.HTTP.Middlewares[whitelistMiddlewareName]
-	if whitelist == nil || whitelist.IPWhiteList == nil {
-		t.Fatalf("whitelist middleware missing: %#v", whitelist)
-	}
-	if !equalStringSlices(whitelist.IPWhiteList.SourceRange, want) {
-		t.Fatalf("unexpected source ranges: %v", whitelist.IPWhiteList.SourceRange)
-	}
 }
