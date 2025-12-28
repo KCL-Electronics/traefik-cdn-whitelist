@@ -2,6 +2,9 @@
 
 export GO111MODULE=on
 
+YAEGI_GOPATH ?= $(PWD)/.yaegi-gopath
+YAEGI_MODULE ?= github.com/KCL-Electronics/traefik-cdn-whitelist
+
 default: lint test
 
 lint:
@@ -11,10 +14,13 @@ test:
 	go test -v -cover ./...
 
 yaegi_test:
-	yaegi test .
+	mkdir -p $(YAEGI_GOPATH)/src/github.com/KCL-Electronics
+	rm -rf $(YAEGI_GOPATH)/src/github.com/KCL-Electronics/traefik-cdn-whitelist
+	ln -s $(PWD) $(YAEGI_GOPATH)/src/github.com/KCL-Electronics/traefik-cdn-whitelist
+	GOPATH=$(YAEGI_GOPATH) YAEGI_YAEGIPATH=$(PWD) yaegi test $(YAEGI_MODULE)
 
 vendor:
 	go mod vendor
 
 clean:
-	rm -rf ./vendor
+	rm -rf ./vendor $(YAEGI_GOPATH)

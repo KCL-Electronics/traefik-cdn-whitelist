@@ -259,11 +259,11 @@ func (p *Provider) collectSources(ctx context.Context) ([]string, error) {
 		if len(errs) == 0 {
 			return nil, errors.New("no CIDR ranges available")
 		}
-		return nil, errors.Join(errs...)
+		return nil, joinErrors(errs)
 	}
 
 	if len(errs) > 0 {
-		log.Printf("[cdn-whitelist] partial refresh errors: %v", errors.Join(errs...))
+		log.Printf("[cdn-whitelist] partial refresh errors: %v", joinErrors(errs))
 	}
 
 	return cidrs, nil
@@ -497,4 +497,24 @@ func cloneStringSlice(in []string) []string {
 	out := make([]string, len(in))
 	copy(out, in)
 	return out
+}
+
+func joinErrors(errs []error) error {
+	if len(errs) == 0 {
+		return nil
+	}
+
+	msgParts := make([]string, 0, len(errs))
+	for _, err := range errs {
+		if err == nil {
+			continue
+		}
+		msgParts = append(msgParts, err.Error())
+	}
+
+	if len(msgParts) == 0 {
+		return nil
+	}
+
+	return errors.New(strings.Join(msgParts, "; "))
 }
