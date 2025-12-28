@@ -1,6 +1,6 @@
 This repository includes an example plugin, `demo`, for you to use as a reference for developing your own plugins.
 
-[![Build Status](https://https://github.com/KCL-Electronics/traefik-cdn-whitelist/workflows/Main/badge.svg?branch=master)](https://github.com/traefik/pluginproviderdemo/actions)
+[![Build Status](https://https://github.com/KCL-Electronics/traefik-cdn-whitelist/workflows/Main/badge.svg?branch=master)](https://github.com/KCL-Electronics/traefik-cdn-whitelist/actions)
 
 The existing plugins can be browsed into the [Plugin Catalog](https://plugins.traefik.io).
 
@@ -57,7 +57,7 @@ The source code of the plugin should be organized as follows:
     └── src
         └── github.com
             └── traefik
-                └── pluginproviderdemo
+                └── traefik-cdn-whitelist
                     ├── demo.go
                     ├── demo_test.go
                     ├── go.mod
@@ -108,7 +108,7 @@ providers:
       pollInterval: 2s
 ```
 
-(In the above example, the `pluginproviderdemo` plugin will be loaded from the path `./plugins-local/src/github.com/KCL-Electronics/traefik-cdn-whitelist`.)
+(In the above example, the `traefik-cdn-whitelist` plugin will be loaded from the path `./plugins-local/src/github.com/KCL-Electronics/traefik-cdn-whitelist`.)
 
 ## Defining a Plugin
 
@@ -275,4 +275,3 @@ In order for your plugin to be successfully imported by Plugins Catalog, consult
 - There must be a valid `go.mod` file at the root of your project.
 - Your plugin must be versioned with a git tag.
 - If you have package dependencies, they must be vendored and added to your GitHub repository.
-
